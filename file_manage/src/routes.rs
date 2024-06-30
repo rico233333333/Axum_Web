@@ -1,5 +1,3 @@
-// mod entity_operations;
-
 use axum::{
     routing::{get, post},
     Router,
