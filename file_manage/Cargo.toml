@@ -1,0 +1,22 @@
+[package]
+name = "file_manage"
+version = "0.1.0"
+edition = "2021"
+default-run = "file_manage"
+
+[dependencies]
+axum = "0.7.5"
+tokio = { version = "1.0", features = ["full"] }
+tower = "0.4.1"
+serde_json = "1.0.118"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sqlx = { version = "0.7", features = [
+    "mysql",
+    "runtime-tokio-rustls",
+    "macros",
+    "chrono",
+] }
+lazy_static = "1.4.0"
+dotenv = "0.15.0" 
