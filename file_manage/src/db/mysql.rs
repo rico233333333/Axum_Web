@@ -1,9 +1,6 @@
-use axum::Extension;
 use dotenv::dotenv;
-use lazy_static::lazy_static;
 use sqlx::mysql::MySqlPoolOptions;
-use sqlx::pool::PoolOptions;
-use sqlx::{MySql, MySqlPool, Pool};
+use sqlx::{MySql, Pool};
 
 
 pub async fn init_db_pool() -> Pool<MySql> {

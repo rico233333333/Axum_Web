@@ -1,8 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize}; // 结构体的序列化与反序列化
 use sqlx::FromRow;
-use std::collections::HashMap;
 use std::fmt;
-use std::fmt::{Display, Formatter}; // 结构体的序列化与反序列化
+use std::fmt::{Display, Formatter};
 
 #[derive(FromRow, Serialize, Deserialize)]
 pub struct User {
@@ -17,7 +16,7 @@ impl Display for User {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
-            "id: {}\nname:{}\npassword: {}\nis_superuser: {}\nuser_level: {}",
+            "id: {}\nname: {}\npassword: {}\nis_superuser: {}\nuser_level: {}",
             self.id, self.name, self.password, self.is_superuser, self.user_level
         )
     }
@@ -37,26 +36,25 @@ impl User {
 
 pub mod user_request {
     use crate::entity_operations::user::t_users::get_user_by_id;
-    use axum::extract::{Json, Path, Query, State};
+    use axum::{extract::{Json, Path, Query, State}, http::StatusCode};
     use serde_json::{json, Value};
     use sqlx::{FromRow, MySql, MySqlConnection, Pool, Result};
     use std::collections::HashMap;
 
-    use super::User;
-
-    pub async fn get_user_only(state: State<Pool<MySql>>, Path(id): Path<i64>) -> Json<Value> {
+    pub async fn get_user_only(
+        state: State<Pool<MySql>>,
+        Path(id): Path<i64>,
+    ) -> (StatusCode, Json<Value>) {
         let data = get_user_by_id(state, id).await;
         // println!("data:{:?}", data);
         match data {
             Ok(user) => {
-                println!("{}", user);
+                (StatusCode::OK, Json(json!({"data": user})))
             }
             Err(err) => {
-                println!("{}", err);
+                (StatusCode::NOT_FOUND, Json(json!({"data": format!("{}", err)})))
             }
         }
-        
-        Json(json!({"data": 1212}))
     }
 
     pub async fn add_user(Query(params): Query<HashMap<String, String>>) -> Json<Value> {
@@ -72,21 +70,18 @@ pub mod t_users {
     /// 具体封装sql还是啥的有点不清楚
     use crate::entity_operations::user::User;
     use axum::extract::State;
-    use sqlx::{query, FromRow, MySql, Pool, Result};
-    use sqlx::Error as SqlxError; // 引入sqlx的错误类型
+    use sqlx::Error as SqlxError;
+    use sqlx::{query, FromRow, MySql, Pool, Result}; // 引入sqlx的错误类型
 
-    pub async fn get_user_by_id(state: State<Pool<MySql>>, id:i64) -> Result<User, SqlxError> {
+    pub async fn get_user_by_id(state: State<Pool<MySql>>, id: i64) -> Result<User, SqlxError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
             .bind(id)
             .fetch_one(&*state)
             .await;
         match user {
-            Ok(user) => {
-                Ok(user)
-            }
+            Ok(user) => Ok(user),
             Err(err) => {
                 println!("{:?}", err.as_database_error());
-                // println!("{:?}", err.into_database_error());
                 Err(err)
             }
         }
