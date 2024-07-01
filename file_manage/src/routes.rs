@@ -3,6 +3,7 @@ use axum::{
     Router,
 };
 use sqlx::{MySql, Pool};
+use tower_http::trace::TraceLayer;
 
 use crate::entity_operations::user::{t_users::get_user_by_id, user_request::{add_user, get_user_only}};
 use crate::models::add;
@@ -16,6 +17,7 @@ pub fn app(pool: Pool<MySql>) -> Router {
         .route("/add", get(add))
         .route("/user", post(add_user))
         .route("/user/:id", get(get_user_only))
+        // .layer(TraceLayer::new_for_http())
         .with_state(pool);
     app
 }
