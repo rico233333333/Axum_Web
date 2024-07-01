@@ -385,6 +385,7 @@ dependencies = [
  "axum",
  "dotenv",
  "lazy_static",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",

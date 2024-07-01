@@ -13,6 +13,6 @@ pub async fn init_db_pool() -> Pool<MySql> {
         .max_connections(20)
         .connect(&database_url)
         .await
-        .expect("池创建失败");
+        .expect("池创建失败！！！");
     pool
 }
