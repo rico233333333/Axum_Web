@@ -6,8 +6,11 @@ default-run = "file_manage"
 
 [dependencies]
 axum = "0.7.5"
+bcrypt = "0.15.1" # 密码哈希函数
+chrono = { version = "0.4.34", features = ["serde"] }
 tokio = { version = "1.0", features = ["full"] }
 tower = "0.4.1"
+jsonwebtoken = "9.3.0"
 serde_json = "1.0.118"
 serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"

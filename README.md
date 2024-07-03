@@ -131,7 +131,7 @@ pub async fn init_db_pool() -> Pool<MySql> {
 
 ```
 
-## 1.5 entity_operations 模块 实体的生明与请求
+## 1.5 entity_operations 模块 实体的声明与请求
 
 按照模块化开发 应该把一个系统按照不同的功能分成不同的模块等 这样方便了程序员对于每个模块的维护 很适合团队开发以及个人开发。
 
@@ -218,7 +218,7 @@ pub mod t_user {
                 println!("{}", user);
                 // Ok(user);
                 ()
-          
+        
             }
             Err(err) => {
                 println!("{}", err);

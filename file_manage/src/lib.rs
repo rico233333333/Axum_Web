@@ -11,6 +11,7 @@ pub mod models {
             password: String::from("qw@13579"),
             is_superuser: true,
             user_level : 1i32,
+            email: String::from("180253680@qq.com")
         };
         println!("测试用户：\n{}", user);
     }

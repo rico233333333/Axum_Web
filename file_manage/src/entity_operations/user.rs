@@ -10,26 +10,28 @@ pub struct User {
     pub password: String,
     pub is_superuser: bool,
     pub user_level: i32,
+    pub email: String
 }
 
 impl Display for User {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
-            "id: {}\nname: {}\npassword: {}\nis_superuser: {}\nuser_level: {}",
-            self.id, self.name, self.password, self.is_superuser, self.user_level
+            "id: {}\nname: {}\npassword: {}\nis_superuser: {}\nuser_level: {}\nemail: {}",
+            self.id, self.name, self.password, self.is_superuser, self.user_level, self.email
         )
     }
 }
 
 impl User {
-    pub fn new(name: String, password: String, is_superuser: bool, user_level: i32) -> Self {
+    pub fn new(name: String, password: String, is_superuser: bool, user_level: i32, email: String) -> Self {
         User {
             id: 111111i64,
             name: name,
             password: format!("加密后：{}", password),
             is_superuser: is_superuser,
             user_level: user_level,
+            email: email,
         }
     }
 }
@@ -81,7 +83,6 @@ pub mod t_users {
         match user {
             Ok(user) => Ok(user),
             Err(err) => {
-                println!("{:?}", err.as_database_error());
                 Err(err)
             }
         }
