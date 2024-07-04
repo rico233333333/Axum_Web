@@ -3,7 +3,7 @@ use sqlx::FromRow;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(FromRow, Serialize, Deserialize)]
+#[derive(FromRow, Serialize, Deserialize, Clone)]
 pub struct User {
     pub id: i64,
     pub name: String,
@@ -37,16 +37,18 @@ impl User {
 }
 
 pub mod user_request {
-    use crate::entity_operations::user::t_users::get_user_by_id;
-    use axum::{extract::{Json, Path, Query, State}, http::StatusCode};
+    use crate::entity_operations::{jwt::CurrentUser, user::t_users::get_user_by_id};
+    use axum::{extract::{Json, Path, Query, State}, http::StatusCode, Extension};
     use serde_json::{json, Value};
     use sqlx::{FromRow, MySql, MySqlConnection, Pool, Result};
     use std::collections::HashMap;
 
     pub async fn get_user_only(
         state: State<Pool<MySql>>,
+        Extension(currentUser): Extension<CurrentUser>,
         Path(id): Path<i64>,
     ) -> (StatusCode, Json<Value>) {
+        println!("传递过来的用户{:?}", currentUser);
         let data = get_user_by_id(state, id).await;
         // println!("data:{:?}", data);
         match data {
@@ -78,6 +80,19 @@ pub mod t_users {
     pub async fn get_user_by_id(state: State<Pool<MySql>>, id: i64) -> Result<User, SqlxError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
             .bind(id)
+            .fetch_one(&*state)
+            .await;
+        match user {
+            Ok(user) => Ok(user),
+            Err(err) => {
+                Err(err)
+            }
+        }
+    }
+
+    pub async fn get_user_by_email(state: State<Pool<MySql>>, email: String) -> Result<User, SqlxError> {
+        let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
+            .bind(email)
             .fetch_one(&*state)
             .await;
         match user {

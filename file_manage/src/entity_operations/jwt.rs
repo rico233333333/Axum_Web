@@ -1,22 +1,27 @@
+use std::fmt;
+
 use axum::{
     body::Body,
-    extract::{Json, Request},
-    http,
-    http::{Response, StatusCode},
+    extract::{Json, Request, State},
+    http::{self, Response, StatusCode},
     middleware::Next,
-    response::IntoResponse,
+    response::{self, IntoResponse},
 };
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde_json::{json};
+use sqlx::{MySql, Pool};
 
+use super::user::{t_users::get_user_by_email, User};
+
+// 定义一个用于在 JWT 令牌中保存声明数据的结构
 #[derive(Serialize, Deserialize)]
-// Define a structure for holding claims data used in JWT tokens
 pub struct Claims {
-    pub exp: usize,    // Expiry time of the token
-    pub iat: usize,    // Issued at time of the token
-    pub email: String, // Email associated with the token
+    pub exp: usize,    // 令牌的过期时间
+    pub iat: usize,    // 令牌签发时间
+    pub email: String, // 与令牌关联的电子邮件
 }
 
 // Define a structure for holding sign-in data
@@ -26,18 +31,20 @@ pub struct SignInData {
     pub password: String, // Password entered during sign-in
 }
 
+// 登录接口
 pub async fn sign_in(
+    state: State<Pool<MySql>>,
     Json(user_data): Json<SignInData>, // JSON payload containing sign-in data
 ) -> Result<Json<String>, StatusCode> {
     println!("{:?}", user_data);
 
-    let user = match retrieve_user_by_email(&user_data.email) {
+    let user = match retrieve_user_by_email(state ,&user_data.email).await {
         Some(user) => user, // User found, proceed with authentication
         None => return Err(StatusCode::UNAUTHORIZED), // User not found, return unauthorized status
     };
 
     // Verify the password provided against the stored hash
-    if !verify_password(&user_data.password, &user.password_hash)
+    if !verify_password(&user_data.password, &user.password).await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     // Handle bcrypt errors
     {
@@ -51,7 +58,7 @@ pub async fn sign_in(
     Ok(Json(token))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CurrentUser {
     pub email: String,
     pub first_name: String,
@@ -59,16 +66,63 @@ pub struct CurrentUser {
     pub password_hash: String,
 }
 
+#[derive(Debug)]
+enum JwtError {
+    RequestHeaderError,         // 请求头错误
+    JwtTokenNotProvided,        // 未携带JwtToken
+    JwtTokenSignatureIsInvalid, // JwtToken签名无效
+    UserIsNotAuthorized,        // 用户未授权
+}
+
+impl fmt::Display for JwtError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            JwtError::RequestHeaderError => write!(f, "请求头错误"),
+            JwtError::JwtTokenNotProvided => write!(f, "请求头中未携带JwtToken"),
+            JwtError::JwtTokenSignatureIsInvalid => write!(f, "JwtToken签名无效"),
+            JwtError::UserIsNotAuthorized => write!(f, "用户未授权"),
+        }
+    }
+}
+
+impl Serialize for JwtError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("JwtError", 0)?;
+        let _ = match *self {
+            JwtError::RequestHeaderError => {
+                state.serialize_field("error", &format!("{}", JwtError::RequestHeaderError))
+            }
+            JwtError::JwtTokenNotProvided => {
+                state.serialize_field("error", &format!("{}", JwtError::JwtTokenNotProvided))
+            }
+            JwtError::JwtTokenSignatureIsInvalid => state.serialize_field(
+                "error",
+                &format!("{}", JwtError::JwtTokenSignatureIsInvalid),
+            ),
+            JwtError::UserIsNotAuthorized => {
+                state.serialize_field("error", &format!("{}", JwtError::UserIsNotAuthorized))
+            }
+        };
+        state.end()
+    }
+}
+
+#[derive(Debug)]
 pub struct AuthError {
+    pub error_type: JwtError,
     pub message: String,
     status_code: StatusCode,
 }
 
 impl AuthError {
-    fn new(message: &str, status_code: StatusCode) -> AuthError {
+    fn new(message: &str, status_code: StatusCode, error_type: JwtError) -> AuthError {
         AuthError {
             message: message.to_string(),
-            status_code,
+            status_code: status_code,
+            error_type: error_type,
         }
     }
 }
@@ -76,24 +130,27 @@ impl AuthError {
 // 这里得实现IntoResponse特征 不明白的可以看看Axum文档
 impl IntoResponse for AuthError {
     fn into_response(self) -> axum::response::Response {
-        let mut res = Response::new(Body::from(self.message));
+        // 创建一个 JSON 对象，包含错误信息和状态码
+        let error_json = json!({
+            "error_type": format!("{}", self.error_type),
+            "error_message": self.message,
+        });
+
+        // 创建一个 HTTP 响应，设置状态码和主体
+        let mut res = axum::response::Response::new(Body::from(error_json.to_string()));
         *res.status_mut() = self.status_code;
+
         res
     }
 }
-// Function to simulate retrieving user data from a database based on email
-fn retrieve_user_by_email(email: &str) -> Option<CurrentUser> {
-    // For demonstration purposes, a hardcoded user is returned based on the provided email
-    let current_user: CurrentUser = CurrentUser {
-        email: "myemail@gmail.com".to_string(),
-        first_name: "Eze".to_string(),
-        last_name: "Sunday".to_string(),
-        password_hash: "$2b$12$Gwf0uvxH3L7JLfo0CC/NCOoijK2vQ/wbgP.LeNup8vj6gg31IiFkm".to_string(),
-    };
-    Some(current_user) // Return the hardcoded user
-}
 
-pub fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
+// 邮箱验证
+async fn retrieve_user_by_email(state: State<Pool<MySql>>, email: &str) -> Option<User> {
+    let user = get_user_by_email(state, email.to_string());
+    Some(user)
+}
+// 密码验证
+async fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
     verify(password, hash)
 }
 
@@ -130,43 +187,52 @@ pub fn decode_jwt(jwt_token: String) -> Result<TokenData<Claims>, StatusCode> {
 }
 
 pub async fn authorization_middleware(
-    mut req: Request,
+    mut req: Request<Body>,
     next: Next,
+    state: State<Pool<MySql>>,
 ) -> Result<Response<Body>, AuthError> {
-    let auth_header = req.headers_mut().get(http::header::AUTHORIZATION);
-    let auth_header = match auth_header {
-        Some(header) => header.to_str().map_err(|_| AuthError {
-            message: "Empty header is not allowed".to_string(),
-            status_code: StatusCode::FORBIDDEN,
-        })?,
-        None => {
-            return Err(AuthError {
-                message: "Please add the JWT token to the header".to_string(),
-                status_code: StatusCode::FORBIDDEN,
-            })
-        }
-    };
-    let mut header = auth_header.split_whitespace();
-    let (bearer, token) = (header.next(), header.next());
-    let token_data = match decode_jwt(token.unwrap().to_string()) {
-        Ok(data) => data,
-        Err(_) => {
-            return Err(AuthError {
-                message: "Unable to decode token".to_string(),
-                status_code: StatusCode::UNAUTHORIZED,
-            })
-        }
-    };
-    // Fetch the user details from the database
-    let current_user = match retrieve_user_by_email(&token_data.claims.email) {
-        Some(user) => user,
-        None => {
-            return Err(AuthError {
-                message: "You are not an authorized user".to_string(),
-                status_code: StatusCode::UNAUTHORIZED,
-            })
-        }
-    };
+    let auth_header = req.headers().get(http::header::AUTHORIZATION);
+
+    // 检查是否存在 Authorization 头，以及它是否不为空
+    let auth_header_str = auth_header.and_then(|h| h.to_str().ok())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| AuthError::new(
+            "请求头中缺少 Authorization 或其内容为空",
+            StatusCode::FORBIDDEN,
+            JwtError::JwtTokenNotProvided,
+        ))?;
+
+    // 解析 "Bearer [token]" 格式
+    let parts: Vec<&str> = auth_header_str.splitn(2, ' ').collect();
+    if parts.len() != 2 || parts[0].to_ascii_lowercase() != "bearer" {
+        return Err(AuthError::new(
+            "请求头中的 Authorization 必须以 'Bearer ' 开头",
+            StatusCode::FORBIDDEN,
+            JwtError::RequestHeaderError,
+        ));
+    }
+    let token = parts[1].trim();
+
+    // 这里添加你的 JWT 解码和验证逻辑...
+    // 例如:
+    let token_data = decode_jwt(token.to_string())
+        .map_err(|_| AuthError::new(
+            "Jwt Token 签名无效",
+            StatusCode::UNAUTHORIZED,
+            JwtError::JwtTokenSignatureIsInvalid,
+        ))?;
+
+    // 验证 JWT 令牌后，获取当前用户...
+    let current_user = retrieve_user_by_email(state, &token_data.claims.email).await
+        .ok_or_else(|| AuthError::new(
+            "用户未授权",
+            StatusCode::UNAUTHORIZED,
+            JwtError::UserIsNotAuthorized,
+        ))?;
+
+    // 将用户信息添加到请求扩展中
     req.extensions_mut().insert(current_user);
+
+    // 继续执行请求链
     Ok(next.run(req).await)
 }
