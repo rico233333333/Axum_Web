@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use axum::{
     body::Body,
@@ -6,13 +6,17 @@ use axum::{
     http::{self, Response, StatusCode},
     middleware::Next,
     response::{self, IntoResponse},
+    Extension,
 };
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
-use serde_json::{json};
+use serde_json::json;
+use sqlx::Error as SqlxError;
 use sqlx::{MySql, Pool};
+
+use crate::routes::DBPool;
 
 use super::user::{t_users::get_user_by_email, User};
 
@@ -33,18 +37,18 @@ pub struct SignInData {
 
 // 登录接口
 pub async fn sign_in(
-    state: State<Pool<MySql>>,
-    Json(user_data): Json<SignInData>, // JSON payload containing sign-in data
+    Json(user_data): Json<SignInData>,
+    State(pool): State<Arc<DBPool>>,
 ) -> Result<Json<String>, StatusCode> {
     println!("{:?}", user_data);
-
-    let user = match retrieve_user_by_email(state ,&user_data.email).await {
+    let user = match retrieve_user_by_email(&pool.pool, &user_data.email).await {
         Some(user) => user, // User found, proceed with authentication
         None => return Err(StatusCode::UNAUTHORIZED), // User not found, return unauthorized status
     };
-
     // Verify the password provided against the stored hash
-    if !verify_password(&user_data.password, &user.password).await
+
+    if !verify_password(&user_data.password, &user.password)
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     // Handle bcrypt errors
     {
@@ -53,8 +57,7 @@ pub async fn sign_in(
 
     // Generate a JWT token for the authenticated user
     let token = encode_jwt(user.email).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; // Handle JWT encoding errors
-
-    // Return the token as a JSON-wrapped string
+                                                                                        // Return the token as a JSON-wrapped string
     Ok(Json(token))
 }
 
@@ -145,9 +148,11 @@ impl IntoResponse for AuthError {
 }
 
 // 邮箱验证
-async fn retrieve_user_by_email(state: State<Pool<MySql>>, email: &str) -> Option<User> {
-    let user = get_user_by_email(state, email.to_string());
-    Some(user)
+async fn retrieve_user_by_email(pool: &Pool<MySql>, email: &str) -> Option<User> {
+    match get_user_by_email(pool.clone(), email.to_string()).await {
+        Ok(user) => Some(user),
+        Err(_) => None,
+    }
 }
 // 密码验证
 async fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
@@ -187,20 +192,23 @@ pub fn decode_jwt(jwt_token: String) -> Result<TokenData<Claims>, StatusCode> {
 }
 
 pub async fn authorization_middleware(
-    mut req: Request<Body>,
+    State(pool): State<Arc<DBPool>>,
+    mut req: Request,
     next: Next,
-    state: State<Pool<MySql>>,
 ) -> Result<Response<Body>, AuthError> {
     let auth_header = req.headers().get(http::header::AUTHORIZATION);
 
     // 检查是否存在 Authorization 头，以及它是否不为空
-    let auth_header_str = auth_header.and_then(|h| h.to_str().ok())
+    let auth_header_str = auth_header
+        .and_then(|h: &http::HeaderValue| h.to_str().ok())
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| AuthError::new(
-            "请求头中缺少 Authorization 或其内容为空",
-            StatusCode::FORBIDDEN,
-            JwtError::JwtTokenNotProvided,
-        ))?;
+        .ok_or_else(|| {
+            AuthError::new(
+                "请求头中缺少 Authorization 或其内容为空",
+                StatusCode::FORBIDDEN,
+                JwtError::JwtTokenNotProvided,
+            )
+        })?;
 
     // 解析 "Bearer [token]" 格式
     let parts: Vec<&str> = auth_header_str.splitn(2, ' ').collect();
@@ -213,25 +221,33 @@ pub async fn authorization_middleware(
     }
     let token = parts[1].trim();
 
-    // 这里添加你的 JWT 解码和验证逻辑...
-    // 例如:
-    let token_data = decode_jwt(token.to_string())
-        .map_err(|_| AuthError::new(
+    let token_data = decode_jwt(token.to_string()).map_err(|_| {
+        AuthError::new(
             "Jwt Token 签名无效",
             StatusCode::UNAUTHORIZED,
             JwtError::JwtTokenSignatureIsInvalid,
-        ))?;
+        )
+    })?;
 
+    // 获取数据库连接池
+    let pool: &Arc<Pool<MySql>> = req
+        .extensions()
+        .get()
+        .expect("Database pool not found in request extensions");
+    let pool_ref: &Pool<MySql> = &*pool;
     // 验证 JWT 令牌后，获取当前用户...
-    let current_user = retrieve_user_by_email(state, &token_data.claims.email).await
-        .ok_or_else(|| AuthError::new(
-            "用户未授权",
-            StatusCode::UNAUTHORIZED,
-            JwtError::UserIsNotAuthorized,
-        ))?;
+    let current_user = retrieve_user_by_email(pool_ref, &token_data.claims.email)
+        .await
+        .ok_or_else(|| {
+            AuthError::new(
+                "用户未授权",
+                StatusCode::UNAUTHORIZED,
+                JwtError::UserIsNotAuthorized,
+            )
+        })?;
 
     // 将用户信息添加到请求扩展中
-    req.extensions_mut().insert(current_user);
+    let insert = req.extensions_mut().insert(current_user);
 
     // 继续执行请求链
     Ok(next.run(req).await)

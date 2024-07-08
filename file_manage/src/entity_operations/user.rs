@@ -37,19 +37,19 @@ impl User {
 }
 
 pub mod user_request {
-    use crate::entity_operations::{jwt::CurrentUser, user::t_users::get_user_by_id};
+    use crate::{entity_operations::{jwt::CurrentUser, user::t_users::get_user_by_id}, routes::DBPool};
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, Extension};
     use serde_json::{json, Value};
     use sqlx::{FromRow, MySql, MySqlConnection, Pool, Result};
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     pub async fn get_user_only(
-        state: State<Pool<MySql>>,
-        Extension(currentUser): Extension<CurrentUser>,
+        // Extension(currentUser): Extension<CurrentUser>,
         Path(id): Path<i64>,
+        State(pool): State<Arc<DBPool>>,
     ) -> (StatusCode, Json<Value>) {
-        println!("传递过来的用户{:?}", currentUser);
-        let data = get_user_by_id(state, id).await;
+        // println!("传递过来的用户{:?}", currentUser);
+        let data = get_user_by_id(&pool, id).await;
         // println!("data:{:?}", data);
         match data {
             Ok(user) => {
@@ -73,14 +73,15 @@ pub mod t_users {
     /// 针对t_user表的操作模块
     /// 具体封装sql还是啥的有点不清楚
     use crate::entity_operations::user::User;
+    use crate::routes::DBPool;
     use axum::extract::State;
     use sqlx::Error as SqlxError;
     use sqlx::{query, FromRow, MySql, Pool, Result}; // 引入sqlx的错误类型
 
-    pub async fn get_user_by_id(state: State<Pool<MySql>>, id: i64) -> Result<User, SqlxError> {
+    pub async fn get_user_by_id(pool: &DBPool, id: i64) -> Result<User, SqlxError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
             .bind(id)
-            .fetch_one(&*state)
+            .fetch_one(&pool.pool)
             .await;
         match user {
             Ok(user) => Ok(user),
@@ -90,10 +91,10 @@ pub mod t_users {
         }
     }
 
-    pub async fn get_user_by_email(state: State<Pool<MySql>>, email: String) -> Result<User, SqlxError> {
+    pub async fn get_user_by_email(pool: Pool<MySql>, email: String) -> Result<User, SqlxError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
             .bind(email)
-            .fetch_one(&*state)
+            .fetch_one(&pool)
             .await;
         match user {
             Ok(user) => Ok(user),
