@@ -1,7 +1,5 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-// 路由模块
 use file_manage::routes::app;
-// pub mod db;
 use file_manage::db::mysql::init_db_pool;
 
 #[tokio::main]

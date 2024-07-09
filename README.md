@@ -17,35 +17,26 @@
 状态共享不懂不理解的话 可以去官网或者百度搜一搜Axum状态共享的三种方式。
 
 ```rust
-use axum::{
-    routing::{get, post},
-    Router,
-    http::{header::HeaderMap,request::Parts, StatusCode},
-};
-use axum::extract::{Path, Query, Json};
-use serde_json::{Value, json};
-use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use std::time::Duration;
-use std::collections::HashMap;
-
-// 路由模块
 use file_manage::routes::app;
-// pub mod db;
-use file_manage::db::mysql::{
-    init_db_pool,
-    // arc_pool,
-};
+use file_manage::db::mysql::init_db_pool;
 
 #[tokio::main]
 async fn main() {
-    // 数据库服务
-    let db_pool = init_db_pool().await;
-  
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "example_jwt=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+    let pool = init_db_pool().await;
     // 开启服务
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app(db_pool)).await.unwrap();
+    tracing::debug!("listening on {}", listener.local_addr().unwrap());
+    axum::serve(listener, app(pool).await).await.unwrap();
 }
+
 ```
 
 ## 1.2 lib.rs
@@ -55,23 +46,10 @@ async fn main() {
 下面的models模块只是为了测试 可以删掉的
 
 ```rust
-pub mod entity_operations;
 pub mod db;
+pub mod entity_operations;
 pub mod routes;
 
-pub mod models {
-    use crate::entity_operations::user;
-    pub async fn add() {
-        let user = user::User{
-            id: 1i64,
-            name: String::from("我叫我也不知道"),
-            password: String::from("qw@13579"),
-            is_superuser: true,
-            user_level : 1i32,
-        };
-        println!("测试用户：\n{}", user);
-    }
-}
 ```
 
 ## 1.3 routes.rs 路由模块
@@ -79,20 +57,42 @@ pub mod models {
 拆分路由把路由整合到函数中
 
 ```rust
-pub fn app(pool: Pool<MySql>) -> Router {
-    let app = Router::new().route("/hello", get(|| async { "Hello, World!" }))
-        .route("/", get(root))
-        .route("/foo", get(get_foo).post(post_foo))
-        .route("/foo/bar", get(foo_bar))
-        // .route("/path/:user_id", get(path)) // Path提取器
-        // .route("/query", post(query))
-        // .route("/string", post(string))
-        .route("/add", get(add))
-        .route("/user", post(add_user))
-        .route("/user/:id", get(get_user_by_id))
-        .with_state(pool);
+use std::sync::Arc;
+
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
+use sqlx::{MySql, Pool};
+
+use crate::entity_operations::jwt::{authorization_middleware, sign_in};
+use crate::entity_operations::user::user_request::{add_user, get_user_only};
+
+#[derive(Clone, Debug)]
+pub struct DBPool {
+    pub pool: Pool<MySql>,
+}
+
+pub async fn app(db_pool: Pool<MySql>) -> Router {
+    // 实例化数据库共享连接池
+    let pool = Arc::new(DBPool { pool: db_pool });
+    let app1 = Router::new()
+        .route("/signin", post(sign_in))
+        .with_state(pool.clone());
+
+    let app2 = Router::new()
+        .route("/:id", get(get_user_only))
+        .layer(middleware::from_fn_with_state(
+            pool.clone(),
+            authorization_middleware,
+        ))
+        .with_state(pool.clone());
+
+    let app = Router::new().nest("/", app1).nest("/user", app2);
     app
 }
+
 ```
 
 ## 1.4 db 模块
@@ -128,7 +128,6 @@ pub async fn init_db_pool() -> Pool<MySql> {
         .expect("池创建失败");
     pool
 }
-
 ```
 
 ## 1.5 entity_operations 模块 实体的声明与请求
@@ -138,54 +137,79 @@ pub async fn init_db_pool() -> Pool<MySql> {
 ### 1.5.1 mod.rs
 
 ```rust
-pub mod user;
+pub mod user; // user实体操作模块
+pub mod jwt;
+pub mod errors;  
 ```
 
-### 1.5.2 user.rs
+### 1.5.2 user.rs 用户实体操作以及用户服务
+
+user 里面包含了user服务需要的数据库操作模块和user服务
+
+用户查询
 
 ```rust
+use serde::{Deserialize, Serialize}; // 结构体的序列化与反序列化
 use sqlx::FromRow;
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(FromRow)]
+#[derive(FromRow, Serialize, Deserialize, Clone)]
 pub struct User {
     pub id: i64,
     pub name: String,
     pub password: String,
     pub is_superuser: bool,
     pub user_level: i32,
+    pub email: String
 }
 
 impl Display for User {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
-            "id: {}\nname:{}\npassword: {}\nis_superuser: {}\nuser_level: {}",
-            self.id, self.name, self.password, self.is_superuser, self.user_level
+            "id: {}\nname: {}\npassword: {}\nis_superuser: {}\nuser_level: {}\nemail: {}",
+            self.id, self.name, self.password, self.is_superuser, self.user_level, self.email
         )
     }
 }
 
 impl User {
-    pub fn new(name: String, password: String, is_superuser: bool, user_level: i32) -> Self {
+    pub fn new(name: String, password: String, is_superuser: bool, user_level: i32, email: String) -> Self {
         User {
             id: 111111i64,
             name: name,
             password: format!("加密后：{}", password),
             is_superuser: is_superuser,
             user_level: user_level,
+            email: email,
         }
     }
 }
 
 pub mod user_request {
-    use axum::extract::{Json, Path, Query};
+    use crate::{entity_operations::user::t_users::get_user_by_id, routes::DBPool};
+    use axum::{extract::{Json, Path, Query, State}, http::StatusCode, Extension};
     use serde_json::{json, Value};
-    use sqlx::{FromRow, MySqlConnection, Result};
-    use std::collections::HashMap;
-    // use crate::entity_operations::user::t_user::get_user_by_id;
+    use std::{collections::HashMap, sync::Arc};
+
+    pub async fn get_user_only(
+        // Extension(currentUser): Extension<CurrentUser>,
+        Path(id): Path<i64>,
+        State(pool): State<Arc<DBPool>>,
+    ) -> (StatusCode, Json<Value>) {
+        // println!("传递过来的用户{:?}", currentUser);
+        let data = get_user_by_id(pool.pool.clone(), id).await;
+        // println!("data:{:?}", data);
+        match data {
+            Ok(user) => {
+                (StatusCode::OK, Json(json!({"data": user})))
+            }
+            Err(err) => {
+                (StatusCode::NOT_FOUND, Json(json!({"data": format!("{}", err)})))
+            }
+        }
+    }
 
     pub async fn add_user(Query(params): Query<HashMap<String, String>>) -> Json<Value> {
         // let data = get_user_by_id(&mut MySqlConnection, 1u64).await.expect("数据查询失败！！！");
@@ -195,38 +219,366 @@ pub mod user_request {
     }
 }
 
-pub mod t_user {
+pub mod t_users {
+    /// 针对t_user表的操作模块
+    /// 具体封装sql还是啥的有点不清楚
     use crate::entity_operations::user::User;
-    use axum::extract::{Json, Path, Query, State};
-    use axum::http::{Error, StatusCode};
-    use sqlx::{query, FromRow, MySql, MySqlConnection, Pool, Result};
+    use sqlx::Error as SqlxError;
+    use sqlx::{query, FromRow, MySql, Pool, Result}; // 引入sqlx的错误类型
 
-    // pub struct Return_http {
-    //     code : 
-    // }
-
-    pub async fn get_user_by_id(
-        state: State<Pool<MySql>>,
-        Path(id): Path<i64>,
-    ) -> () {
+    pub async fn get_user_by_id(pool: Pool<MySql>, id: i64) -> Result<User, SqlxError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
             .bind(id)
-            .fetch_one(&*state)
+            .fetch_one(&pool)
             .await;
         match user {
-            Ok(user) => {
-                println!("{}", user);
-                // Ok(user);
-                ()
-        
-            }
+            Ok(user) => Ok(user),
             Err(err) => {
-                println!("{}", err);
-                // Err(format!("数据库错误{}", err));
-                ()
+                Err(err)
             }
         }
     }
+
+    pub async fn get_user_by_email(pool: Pool<MySql>, email: String) -> Result<User, SqlxError> {
+        let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
+            .bind(email)
+            .fetch_one(&pool)
+            .await;
+        match user {
+            Ok(user) => Ok(user),
+            Err(err) => {
+                Err(err)
+            }
+        }
+    }
+}
+
+```
+
+### 1.5.3 jwt.rs 用户JWT登录、JWT验证中间件
+
+在这里我集成了JWT登录、JWT验证中间件的部分功能 害不太完善后续还需升级改造 不过这个写成一个模块 你们想拿去直接CV就好了  这里还有错误处理的一个示例哦
+
+```rust
+use std::{fmt, sync::Arc};
+
+use crate::routes::DBPool;
+use axum::{
+    body::Body,
+    extract::{Json, Request, State},
+    http::{self, Response, StatusCode},
+    middleware::Next,
+    response::{self, IntoResponse},
+    Extension,
+};
+use bcrypt::{hash, verify, DEFAULT_COST};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::{MySql, Pool};
+
+use super::user::{t_users::get_user_by_email, User};
+
+// 定义一个用于在 JWT 令牌中保存声明数据的结构
+#[derive(Serialize, Deserialize)]
+pub struct Claims {
+    pub exp: usize,    // 令牌的过期时间
+    pub iat: usize,    // 令牌签发时间
+    pub email: String, // 与令牌关联的电子邮件
+}
+
+// 登录结构体
+#[derive(Deserialize, Debug)]
+pub struct SignInData {
+    pub email: String,    // Email entered during sign-in
+    pub password: String, // Password entered during sign-in
+}
+
+// 登录用户返回结构体
+#[derive(Serialize, Debug)]
+pub struct UserSerialize {
+    pub id: i64,
+    pub name: String,
+    pub is_superuser: bool,
+    pub user_level: i32,
+    pub email: String,
+}
+// 登录注册返回结构体
+#[derive(Serialize, Debug)]
+pub struct UserTokenData {
+    pub token: String,           // Email entered during sign-in
+    pub userData: UserSerialize, // Password entered during sign-in
+}
+
+impl UserTokenData {
+    pub fn new(
+        token: String,
+        id: i64,
+        name: String,
+        is_superuser: bool,
+        user_level: i32,
+        email: String,
+    ) -> Self {
+        UserTokenData {
+            token: token,
+            userData: UserSerialize {
+                id: id,
+                name: name,
+                is_superuser: is_superuser,
+                user_level: user_level,
+                email: email,
+            },
+        }
+    }
+}
+
+pub async fn sign_in(
+    State(db_pool): State<Arc<DBPool>>,
+    Json(user_data): Json<SignInData>, // JSON payload containing sign-in data
+) -> Result<Json<Value>, AuthError> {
+    let user = match retrieve_user_by_email(&db_pool.pool, &user_data.email).await {
+        Some(user) => user,
+        None => {
+            return Err(AuthError::new(
+                "请检查登录邮箱",
+                StatusCode::UNAUTHORIZED,
+                JwtError::TheUserDoesNotExist,
+            ))
+        }
+    };
+    // 密码认证
+    if !verify_password(&user_data.password, &user.password)
+        .await
+        .map_err(|_| {
+            AuthError::new(
+                "服务器错误",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                JwtError::ServerError,
+            )
+        })?
+    {
+        return Err(AuthError::new(
+            "请检查密码",
+            StatusCode::UNAUTHORIZED,
+            JwtError::WrongPassword,
+        ));
+    }
+
+    let token = encode_jwt(user.email.clone()).map_err(|_| {
+        AuthError::new(
+            "服务器错误",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            JwtError::ServerError,
+        )
+    })?; // Handle JWT encoding errors
+         // Return the token as a JSON-wrapped string
+    let user_token = UserTokenData::new(
+        token,
+        user.id,
+        user.name,
+        user.is_superuser,
+        user.user_level,
+        user.email,
+    );
+    Ok(Json(json!({"data":user_token})))
+}
+
+// 注册暂时不想写
+async fn register() {}
+
+#[derive(Debug)]
+pub enum JwtError {
+    RequestHeaderError,         // 请求头错误
+    JwtTokenNotProvided,        // 未携带JwtToken
+    JwtTokenSignatureIsInvalid, // JwtToken签名无效
+    UserIsNotAuthorized,        // 用户未授权
+    WrongPassword,              // 密码错误
+    TheUserDoesNotExist,        // 用户不存在
+    ServerError,                // 服务器错误
+}
+
+impl fmt::Display for JwtError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            JwtError::RequestHeaderError => write!(f, "请求头错误"),
+            JwtError::JwtTokenNotProvided => write!(f, "请求头中未携带JwtToken"),
+            JwtError::JwtTokenSignatureIsInvalid => write!(f, "JwtToken签名无效"),
+            JwtError::UserIsNotAuthorized => write!(f, "用户未授权"),
+            JwtError::WrongPassword => write!(f, "密码错误"),
+            JwtError::TheUserDoesNotExist => write!(f, "用户不存在"),
+            JwtError::ServerError => write!(f, "服务器错误"),
+        }
+    }
+}
+
+impl Serialize for JwtError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("JwtError", 0)?;
+        let _ = match *self {
+            JwtError::RequestHeaderError => {
+                state.serialize_field("error", &format!("{}", JwtError::RequestHeaderError))
+            }
+            JwtError::JwtTokenNotProvided => {
+                state.serialize_field("error", &format!("{}", JwtError::JwtTokenNotProvided))
+            }
+            JwtError::JwtTokenSignatureIsInvalid => state.serialize_field(
+                "error",
+                &format!("{}", JwtError::JwtTokenSignatureIsInvalid),
+            ),
+            JwtError::UserIsNotAuthorized => {
+                state.serialize_field("error", &format!("{}", JwtError::UserIsNotAuthorized))
+            }
+            JwtError::WrongPassword => {
+                state.serialize_field("error", &format!("{}", JwtError::WrongPassword))
+            }
+            JwtError::TheUserDoesNotExist => {
+                state.serialize_field("error", &format!("{}", JwtError::TheUserDoesNotExist))
+            }
+            JwtError::ServerError => {
+                state.serialize_field("error", &format!("{}", JwtError::ServerError))
+            }
+        };
+        state.end()
+    }
+}
+
+#[derive(Debug)]
+pub struct AuthError {
+    pub error_type: JwtError,
+    pub message: String,
+    status_code: StatusCode,
+}
+
+impl AuthError {
+    fn new(message: &str, status_code: StatusCode, error_type: JwtError) -> AuthError {
+        AuthError {
+            message: message.to_string(),
+            status_code: status_code,
+            error_type: error_type,
+        }
+    }
+}
+
+// 这里得实现IntoResponse特征 不明白的可以看看Axum文档
+impl IntoResponse for AuthError {
+    fn into_response(self) -> axum::response::Response {
+        // 创建一个 JSON 对象，包含错误信息和状态码
+        let error_json = json!({
+            "error_type": format!("{}", self.error_type),
+            "error_message": self.message,
+        });
+
+        // 创建一个 HTTP 响应，设置状态码和主体
+        let mut res = axum::response::Response::new(Body::from(error_json.to_string()));
+        *res.status_mut() = self.status_code;
+
+        res
+    }
+}
+
+// 邮箱验证
+async fn retrieve_user_by_email(pool: &Pool<MySql>, email: &str) -> Option<User> {
+    match get_user_by_email(pool.clone(), email.to_string()).await {
+        Ok(user) => Some(user),
+        Err(_) => None,
+    }
+}
+// 密码验证
+async fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
+    verify(password, hash)
+}
+
+// hash密码不可逆加密
+pub fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
+    let hash = hash(password, DEFAULT_COST)?;
+    Ok(hash)
+}
+
+pub fn encode_jwt(email: String) -> Result<String, StatusCode> {
+    let secret: String = "randomStringTypicallyFromEnv".to_string();
+    let now = Utc::now();
+    let expire: chrono::TimeDelta = Duration::hours(24);
+    let exp: usize = (now + expire).timestamp() as usize;
+    let iat: usize = now.timestamp() as usize;
+    let claim = Claims { iat, exp, email };
+
+    encode(
+        &Header::default(),
+        &claim,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub fn decode_jwt(jwt_token: String) -> Result<TokenData<Claims>, StatusCode> {
+    let secret = "randomStringTypicallyFromEnv".to_string();
+    let result: Result<TokenData<Claims>, StatusCode> = decode(
+        &jwt_token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::default(),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+    result
+}
+
+pub async fn authorization_middleware(
+    State(pool): State<Arc<DBPool>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response<Body>, AuthError> {
+    let auth_header = req.headers().get(http::header::AUTHORIZATION);
+
+    // 检查是否存在 Authorization 头，以及它是否不为空
+    let auth_header_str = auth_header
+        .and_then(|h: &http::HeaderValue| h.to_str().ok())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            AuthError::new(
+                "请求头中缺少 Authorization 或其内容为空",
+                StatusCode::FORBIDDEN,
+                JwtError::JwtTokenNotProvided,
+            )
+        })?;
+
+    // 解析 "Bearer [token]" 格式
+    let parts: Vec<&str> = auth_header_str.splitn(2, ' ').collect();
+    if parts.len() != 2 || parts[0].to_ascii_lowercase() != "bearer" {
+        return Err(AuthError::new(
+            "请求头中的 Authorization 必须以 'Bearer ' 开头",
+            StatusCode::FORBIDDEN,
+            JwtError::RequestHeaderError,
+        ));
+    }
+    let token = parts[1].trim();
+
+    let token_data = decode_jwt(token.to_string()).map_err(|_| {
+        AuthError::new(
+            "Jwt Token 签名无效",
+            StatusCode::UNAUTHORIZED,
+            JwtError::JwtTokenSignatureIsInvalid,
+        )
+    })?;
+
+    // 验证 JWT 令牌后，获取当前用户...
+    let current_user = retrieve_user_by_email(&pool.pool, &token_data.claims.email)
+        .await
+        .ok_or_else(|| {
+            AuthError::new(
+                "用户未授权",
+                StatusCode::UNAUTHORIZED,
+                JwtError::UserIsNotAuthorized,
+            )
+        })?;
+
+    // 将用户信息添加到请求扩展中
+    let insert = req.extensions_mut().insert(current_user);
+
+    // 继续执行请求链
+    Ok(next.run(req).await)
 }
 
 ```

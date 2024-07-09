@@ -122,16 +122,11 @@ pub async fn sign_in(
     Ok(Json(json!({"data":user_token})))
 }
 
-#[derive(Clone, Debug)]
-pub struct CurrentUser {
-    pub email: String,
-    pub first_name: String,
-    pub last_name: String,
-    pub password_hash: String,
-}
+// 注册暂时不想写
+async fn register() {}
 
 #[derive(Debug)]
-enum JwtError {
+pub enum JwtError {
     RequestHeaderError,         // 请求头错误
     JwtTokenNotProvided,        // 未携带JwtToken
     JwtTokenSignatureIsInvalid, // JwtToken签名无效

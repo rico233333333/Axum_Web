@@ -37,10 +37,9 @@ impl User {
 }
 
 pub mod user_request {
-    use crate::{entity_operations::{jwt::CurrentUser, user::t_users::get_user_by_id}, routes::DBPool};
+    use crate::{entity_operations::user::t_users::get_user_by_id, routes::DBPool};
     use axum::{extract::{Json, Path, Query, State}, http::StatusCode, Extension};
     use serde_json::{json, Value};
-    use sqlx::{FromRow, MySql, MySqlConnection, Pool, Result};
     use std::{collections::HashMap, sync::Arc};
 
     pub async fn get_user_only(
@@ -73,7 +72,6 @@ pub mod t_users {
     /// 针对t_user表的操作模块
     /// 具体封装sql还是啥的有点不清楚
     use crate::entity_operations::user::User;
-    use crate::routes::DBPool;
     use sqlx::Error as SqlxError;
     use sqlx::{query, FromRow, MySql, Pool, Result}; // 引入sqlx的错误类型
 

@@ -44,47 +44,6 @@ pub async fn error(err: Error) -> DBError {
                 String::from("解析连接字符串时发生错误。")
             )
         }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
-        Configuration => {
-            DBError::new(
-                StatusCode::INTERNAL_SERVER_ERROR, 
-                String::from("解析连接字符串时发生错误。")
-            )
-        }
+        
     }
 }
