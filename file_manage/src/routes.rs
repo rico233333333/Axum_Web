@@ -8,7 +8,7 @@ use axum::{
 use sqlx::{MySql, Pool};
 
 use crate::entity_operations::jwt::{authorization_middleware, sign_in};
-use crate::entity_operations::user::user_request::{add_user, get_user_only};
+use crate::entity_operations::user::user_request::get_user_only;
 
 #[derive(Clone, Debug)]
 pub struct DBPool {
