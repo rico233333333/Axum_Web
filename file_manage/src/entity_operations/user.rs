@@ -49,7 +49,7 @@ pub mod user_request {
         State(pool): State<Arc<DBPool>>,
     ) -> (StatusCode, Json<Value>) {
         // println!("传递过来的用户{:?}", currentUser);
-        let data = get_user_by_id(&pool, id).await;
+        let data = get_user_by_id(pool.pool.clone(), id).await;
         // println!("data:{:?}", data);
         match data {
             Ok(user) => {
@@ -74,14 +74,13 @@ pub mod t_users {
     /// 具体封装sql还是啥的有点不清楚
     use crate::entity_operations::user::User;
     use crate::routes::DBPool;
-    use axum::extract::State;
     use sqlx::Error as SqlxError;
     use sqlx::{query, FromRow, MySql, Pool, Result}; // 引入sqlx的错误类型
 
-    pub async fn get_user_by_id(pool: &DBPool, id: i64) -> Result<User, SqlxError> {
+    pub async fn get_user_by_id(pool: Pool<MySql>, id: i64) -> Result<User, SqlxError> {
         let user = sqlx::query_as::<_, User>("SELECT * FROM t_users WHERE id = ?")
             .bind(id)
-            .fetch_one(&pool.pool)
+            .fetch_one(&pool)
             .await;
         match user {
             Ok(user) => Ok(user),

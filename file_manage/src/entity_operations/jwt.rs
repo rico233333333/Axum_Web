@@ -1,5 +1,6 @@
 use std::{fmt, sync::Arc};
 
+use crate::routes::DBPool;
 use axum::{
     body::Body,
     extract::{Json, Request, State},
@@ -12,11 +13,8 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
-use serde_json::json;
-use sqlx::Error as SqlxError;
+use serde_json::{json, Value};
 use sqlx::{MySql, Pool};
-
-use crate::routes::DBPool;
 
 use super::user::{t_users::get_user_by_email, User};
 
@@ -28,37 +26,100 @@ pub struct Claims {
     pub email: String, // 与令牌关联的电子邮件
 }
 
-// Define a structure for holding sign-in data
+// 登录结构体
 #[derive(Deserialize, Debug)]
 pub struct SignInData {
     pub email: String,    // Email entered during sign-in
     pub password: String, // Password entered during sign-in
 }
 
-// 登录接口
-pub async fn sign_in(
-    Json(user_data): Json<SignInData>,
-    State(pool): State<Arc<DBPool>>,
-) -> Result<Json<String>, StatusCode> {
-    println!("{:?}", user_data);
-    let user = match retrieve_user_by_email(&pool.pool, &user_data.email).await {
-        Some(user) => user, // User found, proceed with authentication
-        None => return Err(StatusCode::UNAUTHORIZED), // User not found, return unauthorized status
-    };
-    // Verify the password provided against the stored hash
+// 登录用户返回结构体
+#[derive(Serialize, Debug)]
+pub struct UserSerialize {
+    pub id: i64,
+    pub name: String,
+    pub is_superuser: bool,
+    pub user_level: i32,
+    pub email: String,
+}
+// 登录注册返回结构体
+#[derive(Serialize, Debug)]
+pub struct UserTokenData {
+    pub token: String,           // Email entered during sign-in
+    pub userData: UserSerialize, // Password entered during sign-in
+}
 
+impl UserTokenData {
+    pub fn new(
+        token: String,
+        id: i64,
+        name: String,
+        is_superuser: bool,
+        user_level: i32,
+        email: String,
+    ) -> Self {
+        UserTokenData {
+            token: token,
+            userData: UserSerialize {
+                id: id,
+                name: name,
+                is_superuser: is_superuser,
+                user_level: user_level,
+                email: email,
+            },
+        }
+    }
+}
+
+pub async fn sign_in(
+    State(db_pool): State<Arc<DBPool>>,
+    Json(user_data): Json<SignInData>, // JSON payload containing sign-in data
+) -> Result<Json<Value>, AuthError> {
+    let user = match retrieve_user_by_email(&db_pool.pool, &user_data.email).await {
+        Some(user) => user,
+        None => {
+            return Err(AuthError::new(
+                "请检查登录邮箱",
+                StatusCode::UNAUTHORIZED,
+                JwtError::TheUserDoesNotExist,
+            ))
+        }
+    };
+    // 密码认证
     if !verify_password(&user_data.password, &user.password)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    // Handle bcrypt errors
+        .map_err(|_| {
+            AuthError::new(
+                "服务器错误",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                JwtError::ServerError,
+            )
+        })?
     {
-        return Err(StatusCode::UNAUTHORIZED); // Password verification failed, return unauthorized status
+        return Err(AuthError::new(
+            "请检查密码",
+            StatusCode::UNAUTHORIZED,
+            JwtError::WrongPassword,
+        ));
     }
 
-    // Generate a JWT token for the authenticated user
-    let token = encode_jwt(user.email).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; // Handle JWT encoding errors
-                                                                                        // Return the token as a JSON-wrapped string
-    Ok(Json(token))
+    let token = encode_jwt(user.email.clone()).map_err(|_| {
+        AuthError::new(
+            "服务器错误",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            JwtError::ServerError,
+        )
+    })?; // Handle JWT encoding errors
+         // Return the token as a JSON-wrapped string
+    let user_token = UserTokenData::new(
+        token,
+        user.id,
+        user.name,
+        user.is_superuser,
+        user.user_level,
+        user.email,
+    );
+    Ok(Json(json!({"data":user_token})))
 }
 
 #[derive(Clone, Debug)]
@@ -75,6 +136,9 @@ enum JwtError {
     JwtTokenNotProvided,        // 未携带JwtToken
     JwtTokenSignatureIsInvalid, // JwtToken签名无效
     UserIsNotAuthorized,        // 用户未授权
+    WrongPassword,              // 密码错误
+    TheUserDoesNotExist,        // 用户不存在
+    ServerError,                // 服务器错误
 }
 
 impl fmt::Display for JwtError {
@@ -84,6 +148,9 @@ impl fmt::Display for JwtError {
             JwtError::JwtTokenNotProvided => write!(f, "请求头中未携带JwtToken"),
             JwtError::JwtTokenSignatureIsInvalid => write!(f, "JwtToken签名无效"),
             JwtError::UserIsNotAuthorized => write!(f, "用户未授权"),
+            JwtError::WrongPassword => write!(f, "密码错误"),
+            JwtError::TheUserDoesNotExist => write!(f, "用户不存在"),
+            JwtError::ServerError => write!(f, "服务器错误"),
         }
     }
 }
@@ -107,6 +174,15 @@ impl Serialize for JwtError {
             ),
             JwtError::UserIsNotAuthorized => {
                 state.serialize_field("error", &format!("{}", JwtError::UserIsNotAuthorized))
+            }
+            JwtError::WrongPassword => {
+                state.serialize_field("error", &format!("{}", JwtError::WrongPassword))
+            }
+            JwtError::TheUserDoesNotExist => {
+                state.serialize_field("error", &format!("{}", JwtError::TheUserDoesNotExist))
+            }
+            JwtError::ServerError => {
+                state.serialize_field("error", &format!("{}", JwtError::ServerError))
             }
         };
         state.end()
@@ -159,6 +235,7 @@ async fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::Bcr
     verify(password, hash)
 }
 
+// hash密码不可逆加密
 pub fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
     let hash = hash(password, DEFAULT_COST)?;
     Ok(hash)
@@ -229,14 +306,8 @@ pub async fn authorization_middleware(
         )
     })?;
 
-    // 获取数据库连接池
-    let pool: &Arc<Pool<MySql>> = req
-        .extensions()
-        .get()
-        .expect("Database pool not found in request extensions");
-    let pool_ref: &Pool<MySql> = &*pool;
     // 验证 JWT 令牌后，获取当前用户...
-    let current_user = retrieve_user_by_email(pool_ref, &token_data.claims.email)
+    let current_user = retrieve_user_by_email(&pool.pool, &token_data.claims.email)
         .await
         .ok_or_else(|| {
             AuthError::new(

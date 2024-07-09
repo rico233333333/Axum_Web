@@ -20,7 +20,7 @@ pub async fn app(db_pool: Pool<MySql>) -> Router {
     // 实例化数据库共享连接池
     let pool = Arc::new(DBPool { pool: db_pool });
     let app1 = Router::new()
-        // .route("/signin", post(sign_in))
+        .route("/signin", post(sign_in))
         .route("/", get(root))
         .route("/foo", get(get_foo).post(post_foo))
         .route("/foo/bar", get(foo_bar))
