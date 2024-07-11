@@ -137,7 +137,7 @@ pub enum JwtError {
 }
 
 impl fmt::Display for JwtError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             JwtError::RequestHeaderError => write!(f, "请求头错误"),
             JwtError::JwtTokenNotProvided => write!(f, "请求头中未携带JwtToken"),
