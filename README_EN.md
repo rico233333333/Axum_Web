@@ -1,27 +1,27 @@
-# Axum_Web 练手文件公网映射项目
-简体中文|[English](README_EN.md)
+# Axum_Web Practice File Public Network Mapping Project
+[简体中文](README.md)|English
 
-对于RustWeb开发的一个自学的小案例 具体想映射本地文件到公网 让用户可以快捷操作。
+For a small self-study case of RustWeb development, I want to map a local file to the public network, so that users can do it quickly.
 
-后端选择了RUST Axum框架。
+The backend chose the RUST Axum framework.
 
-前端Vue3 慢慢开发了 不着急了。
+The front-end Vue3 is slowly being developed, so there's no hurry.
 
-想着尽善尽美 对于后端把里面的东西都封装的差不多 然后搞一个文档 WEB开发的核心就那么多 不需要文件功能的直接删除文件部分的东西就可以了。至于前端我也想的是这样做 但是得等到后端的基本上都封装完了。
+Thinking about perfection, for the back-end, encapsulating everything in it is almost the same, and then making a document, the core of WEB development is so much, and you don't need the file function to delete the file part of the things. As for the front-end, I'd like to do that, but I'll have to wait until the back-end is basically finished.
 
-看到这里**喜欢**或者**clone**了本仓库就点个**star**支持一下吧 
+If you **like** or **clone** this repository, please give it a **star** to support it.
 
-本仓库作者在闲暇之余会持续更新
+The author of this repository will continue to update it in his spare time.
 
 ---
 
-# 1. 模块说明
+# 1. Module Description
 
 ## 1.1 main.rs
 
-程序主入口文件 调用db模块 创建数据库连接池 使用axum状态共享 共享数据库连接池等。
+The main entry file of the program calls the db module, creates a database connection pool, and uses the Axum state sharing to share the database connection pool.
 
-状态共享不懂不理解的话 可以去官网或者百度搜一搜Axum状态共享的三种方式。
+If you don't understand state sharing, you can search for the three ways of Axum state sharing on the official website or Baidu.
 
 ```rust
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -38,7 +38,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
     let pool = init_db_pool().await;
-    // 开启服务
+    // Start Sevrer
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::debug!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app(pool).await).await.unwrap();
@@ -48,7 +48,7 @@ async fn main() {
 
 ## 1.2 lib.rs
 
-方便create
+Convenient for creation.
 
 ```rust
 pub mod db;
@@ -57,9 +57,9 @@ pub mod routes;
 
 ```
 
-## 1.3 routes.rs 路由模块
+## 1.3 routes.rs Routing Module
 
-拆分路由把路由整合到函数中
+Split the routes and integrate them into functions.
 
 ```rust
 use std::sync::Arc;
@@ -80,7 +80,7 @@ pub struct DBPool {
 }
 
 pub async fn app(db_pool: Pool<MySql>) -> Router {
-    // 实例化数据库共享连接池
+    // Instantiate a database shared connection pool
     let pool = Arc::new(DBPool { pool: db_pool });
     let app1 = Router::new()
         .route("/signin", post(sign_in))
@@ -100,7 +100,7 @@ pub async fn app(db_pool: Pool<MySql>) -> Router {
 
 ```
 
-## 1.4 db 模块
+## 1.4 db Module
 
 ### 1.4.1 mod.rs
 
@@ -110,9 +110,9 @@ pub mod mysql;
 
 ### 1.4.2 mysql.rs
 
-读取配置文件 链接mysql。
+Read the configuration file and connect to MySQL.
 
-可以按照不同的数据库 去调用sqlx不同的数据库连接池的。
+You can call different database connection pools of sqlx according to different databases.
 
 ```rust
 use axum::Extension;
@@ -124,20 +124,20 @@ use sqlx::{MySql, MySqlPool, Pool};
 
 
 pub async fn init_db_pool() -> Pool<MySql> {
-    dotenv().ok().expect("环境加载失败！！！");
-    let database_url = std::env::var("DATABASE_URL").expect("数据库连接失败！！！");
+    dotenv().ok().expect("Environment load failed!!!");
+    let database_url = std::env::var("DATABASE_URL").expect("Database connection failed!!!");
     let pool = MySqlPoolOptions::new()
         .max_connections(20)
         .connect(&database_url)
         .await
-        .expect("池创建失败");
+        .expect("Pool creation failed");
     pool
 }
 ```
 
-## 1.5 entity_operations 模块 实体的声明与请求
+## 1.5 entity_operations Module Entity Declaration and Request
 
-按照模块化开发 应该把一个系统按照不同的功能分成不同的模块等 这样方便了程序员对于每个模块的维护 很适合团队开发以及个人开发。
+According to modular development, a system should be divided into different modules according to different functions, which facilitates the maintenance of each module by programmers and is suitable for team development as well as individual development.
 
 ### 1.5.1 mod.rs
 
@@ -147,11 +147,11 @@ pub mod jwt;
 pub mod errors;  
 ```
 
-### 1.5.2 user.rs 用户实体操作以及用户服务
+### 1.5.2 user.rs User Entity Operation and User Service
 
-user 里面包含了user服务需要的数据库操作模块和user服务
+User includes the database operation module and user service required for user services.
 
-用户查询
+User query
 
 ```rust
 use serde::{Deserialize, Serialize}; // 结构体的序列化与反序列化
@@ -260,9 +260,9 @@ pub mod t_users {
 
 ```
 
-### 1.5.3 jwt.rs 用户JWT登录、JWT验证中间件
+### 1.5.3 jwt.rs User JWT Login, JWT Verification Middleware
 
-在这里我集成了JWT登录、JWT验证中间件的部分功能 害不太完善后续还需升级改造 不过这个写成一个模块 你们想拿去直接CV就好了  这里还有错误处理的一个示例哦
+I have integrated some functions of JWT login and JWT verification middleware here. It's not very complete and needs to be upgraded and transformed later. But this is written as a module, and you can take it directly CV if you want. Here is also an example of error handling.
 
 ```rust
 use std::{fmt, sync::Arc};
