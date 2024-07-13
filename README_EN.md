@@ -61,6 +61,51 @@ pub mod routes;
 
 Split the routes and integrate them into functions.
 
+Here is a database connection pool that needs to establish a database named **file_manage**.
+
+```sql
+CREATE DATABASE file_manage;
+```
+
+Here we also need to create a data table. Let's establish a table with a **primary key that auto-increments**; this way, it will be easier for us to manage, won't it?
+```sql
+use file_manage;
+
+CREATE TABLE 't_users' (
+  'id' bigint NOT NULL AUTO_INCREMENT,
+  'name' varchar(255) NOT NULL,
+  'password' varchar(255) NOT NULL,
+  'is_superuser' tinyint(1) NOT NULL,
+  'user_level' int NOT NULL,
+  'email' varchar(255) NOT NULL,
+  PRIMARY KEY ('id')
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+```
+Do we also need to insert data into the data table **t_users**? 
+The password here is encrypted as **password1**.
+```sql
+INSERT INTO 't_users' ('name', 'password', 'is_superuser', 'user_level', 'email') VALUES ('Alice','$2b$12$vPpLleEkSK1yX9.qUAri9uYkJxnmrQduUmYSJxH8VTAhBnqcSwxd.', 1, 1, '1@qq.com');
+```
+As for how the password is verified, you can find it in the **entity_operations** below.
+Alright, **because I am "kind"**, I have copied out the code.
+```rust
+// Password Verification Function
+async fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
+    verify(password, hash)
+}
+
+// Password Hashing with Irreversible Encryption
+pub fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
+    let hash = hash(password, DEFAULT_COST)?;
+    Ok(hash)
+}
+```
+---
+Below is the real deal **routes.rs**.
+You can see that there are routing middleware and data sharing written here.
+Haha, I learned this while at work, isn't that a **great improvement**?
+
+As for how to log in, I will place **ApiFox** screenshots later on.
 ```rust
 use std::sync::Arc;
 
@@ -586,4 +631,118 @@ pub async fn authorization_middleware(
     Ok(next.run(req).await)
 }
 
+```
+
+# 2. URL Request
+Below are some examples of making requests using **ApiFox**. I'm still considering where to place this in the chapters. Please let me know if there are any **BUGS**.
+
+First, **cd** into the **file_manage** directory.
+Then, start **Axum** on port 3000, which can be set in the **main.rs** file.
+```shell
+cd file_manage
+cargo run
+```
+## 2.1 Login and JWT Middleware Authentication
+Below is how to perform login and use JWT middleware for user identity verification.
+
+### 2.1.1 Login
+Since my login interface retrieves the JSON string passed from the front end to the backend, i.e., it uses `Json(user_data): Json<SignInData>`, it is not possible to send data to the backend in the form of a form. Instead, JSON is sent directly.
+Request URL
+```
+http://127.0.0.1:3000/signin
+```
+Note: When using ApiFox and Postman, please change **form-data** to **raw**.
+
+#### 200
+succeed
+```json
+{
+    "email": "1@qq.com",
+    "password": "password1"
+}
+```
+```json
+{
+    "data": {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3MjA5MTg1NjYsImlhdCI6MTcyMDgzMjE2NiwiZW1haWwiOiIxQHFxLmNvbSJ9.pz52KFvAS7yseNku_F3BguSzQqgWZDBEKjpevTLSu-g",
+        "userData": {
+            "email": "1@qq.com",
+            "id": 1,
+            "is_superuser": true,
+            "name": "Alice",
+            "user_level": 1
+        }
+    }
+}
+```
+#### 401 
+The password is wrong or doesn't exist
+```json
+{
+    "email": "1@qq.com",
+    "password": ""
+}
+```
+```json
+{
+    "error_message": "请检查密码",
+    "error_type": "密码错误"
+}
+```
+#### 401
+The mailbox is wrong or does not exist
+```json
+{
+    "email": "",
+    "password": "password1"
+}
+```
+```json
+{
+    "error_message": "请检查登录邮箱",
+    "error_type": "用户不存在"
+}
+```
+#### 500
+The 500 here is not due to a code error, but because the database for the user **2@qq.com** did not encrypt the **password**.
+```json
+{
+    "email": "2@qq.com",
+    "password": "password1"
+}
+```
+```json
+{
+    "error_message": "服务器错误",
+    "error_type": "服务器错误"
+}
+```
+### 2.1.2 Middleware Authentication
+Here's an example of a user being read from data, mainly to highlight the middleware, where a user ID needs to be passed
+```
+http://127.0.0.1:3000/user/{id}
+http://127.0.0.1:3000/user/1
+```
+Note: When carrying a token, it needs to be included in the **Headers** with **Authorization** **Bearer token**. There should be a space between "Bearer" and "token".
+#### 200
+succeed
+```json
+{
+    "data": {
+        "email": "1@qq.com",
+        "id": 1,
+        "is_superuser": true,
+        "name": "Alice",
+        "password": "$2b$12$vPpLleEkSK1yX9.qUAri9uYkJxnmrQduUmYSJxH8VTAhBnqcSwxd.",
+        "user_level": 1
+    }
+}
+```
+#### 401
+The JWT token expires
+```json
+{
+    "error_message": "Jwt Token 签名无效",
+    "error_type": "JwtToken签名无效"
+}
 ```

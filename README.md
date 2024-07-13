@@ -61,6 +61,50 @@ pub mod routes;
 
 拆分路由把路由整合到函数中
 
+这里有个数据库连接池 需要建立数据库 **file_manage**
+
+```sql
+CREATE DATABASE file_manage;
+```
+
+这里还需要建立数据表 这里建立**主键自增**的表就好啦这样咱也好打理不是
+```sql
+use file_manage;
+
+CREATE TABLE 't_users' (
+  'id' bigint NOT NULL AUTO_INCREMENT,
+  'name' varchar(255) NOT NULL,
+  'password' varchar(255) NOT NULL,
+  'is_superuser' tinyint(1) NOT NULL,
+  'user_level' int NOT NULL,
+  'email' varchar(255) NOT NULL,
+  PRIMARY KEY ('id')
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+```
+建立数据表**t_users**是不是还得插入数据呀 
+这里的密码是经过加密的**password1**
+```sql
+INSERT INTO 't_users' ('name', 'password', 'is_superuser', 'user_level', 'email') VALUES ('Alice','$2b$12$vPpLleEkSK1yX9.qUAri9uYkJxnmrQduUmYSJxH8VTAhBnqcSwxd.', 1, 1, '1@qq.com');
+```
+至于密码是怎么验证的 可以在下方的**entity_operations**中找到
+好吧 **因为我"善"** 所以我把代码摘抄出来了
+```rust
+// 密码验证函数
+async fn verify_password(password: &str, hash: &str) -> Result<bool, bcrypt::BcryptError> {
+    verify(password, hash)
+}
+
+// hash密码不可逆加密
+pub fn hash_password(password: &str) -> Result<String, bcrypt::BcryptError> {
+    let hash = hash(password, DEFAULT_COST)?;
+    Ok(hash)
+}
+```
+---
+下面才是正儿八经的**routes.rs**
+可以看到这里写的有路由中间件、还有数据共享 哈哈 我在上班的时候学习的 是不是**狠狠的进步**了呀
+
+至于怎么登录 我会在后面放置**ApiFox**截图
 ```rust
 use std::sync::Arc;
 
@@ -586,4 +630,115 @@ pub async fn authorization_middleware(
     Ok(next.run(req).await)
 }
 
+```
+
+# 2. URL请求
+下面使用**ApiFox**进行请求的一些示例啦 具体放置在第几章我还在观望 存在**BUG**请告诉我哦
+首先**cd**到**file_manage**中
+然后启动**Axum** 开启3000的端口 可以在**main.rs**中设置
+```shell
+cd file_manage
+cargo run
+```
+## 2.1 登录以及JWT中间件验证
+下面就是登录以及怎么使用JWT中间件进行用户身份识别的
+### 2.1.1 登录
+因为 我的登录接口获取的是前端传递给后台的Json字符串 也就是使用了```Json(user_data): Json<SignInData>,``` 所以这里不能以表单的形式把数据发送到后端的 是直接发送json
+请求url
+```
+http://127.0.0.1:3000/signin
+```
+注意：使用ApiFox与PostMan的时候把**form-data**修改成**row**
+#### 200
+成功
+```json
+{
+    "email": "1@qq.com",
+    "password": "password1"
+}
+```
+```json
+{
+    "data": {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3MjA5MTg1NjYsImlhdCI6MTcyMDgzMjE2NiwiZW1haWwiOiIxQHFxLmNvbSJ9.pz52KFvAS7yseNku_F3BguSzQqgWZDBEKjpevTLSu-g",
+        "userData": {
+            "email": "1@qq.com",
+            "id": 1,
+            "is_superuser": true,
+            "name": "Alice",
+            "user_level": 1
+        }
+    }
+}
+```
+#### 401 
+密码错误或不存在
+```json
+{
+    "email": "1@qq.com",
+    "password": ""
+}
+```
+```json
+{
+    "error_message": "请检查密码",
+    "error_type": "密码错误"
+}
+```
+#### 401
+邮箱错误或不存在
+```json
+{
+    "email": "",
+    "password": "password1"
+}
+```
+```json
+{
+    "error_message": "请检查登录邮箱",
+    "error_type": "用户不存在"
+}
+```
+#### 500
+这里的500并不是代码错了 而是我数据库对于**2@qq.com** 用户的**password**没有进行加密导致的
+```json
+{
+    "email": "2@qq.com",
+    "password": "password1"
+}
+```
+```json
+{
+    "error_message": "服务器错误",
+    "error_type": "服务器错误"
+}
+```
+### 2.1.2 中间件认证
+下面就是一个从数据读取一个用户的案例 主要是为了凸显中间件 这里需要传递一个用户id
+```
+http://127.0.0.1:3000/user/{id}
+http://127.0.0.1:3000/user/1
+```
+注意：携带token需要在**Headers**中 携带 **Authorization** **Bearer token** 这里bearer与token中需要一个空格
+#### 200
+成功
+```json
+{
+    "data": {
+        "email": "1@qq.com",
+        "id": 1,
+        "is_superuser": true,
+        "name": "Alice",
+        "password": "$2b$12$vPpLleEkSK1yX9.qUAri9uYkJxnmrQduUmYSJxH8VTAhBnqcSwxd.",
+        "user_level": 1
+    }
+}
+```
+#### 401
+Jwt Token过期
+```json
+{
+    "error_message": "Jwt Token 签名无效",
+    "error_type": "JwtToken签名无效"
+}
 ```
