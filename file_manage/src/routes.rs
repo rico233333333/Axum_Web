@@ -15,6 +15,10 @@ pub struct DBPool {
     pub pool: Pool<MySql>,
 }
 
+pub struct Redis {
+    pub redis_pool: String,
+}
+
 pub async fn app(db_pool: Pool<MySql>) -> Router {
     // 实例化数据库共享连接池
     let pool = Arc::new(DBPool { pool: db_pool });
