@@ -1,3 +1,4 @@
+![alt text](https://github.com/rico233333333/Axum_Web/src/images/svg/logo.svg)
 # Axum_Web 练手文件公网映射项目
 简体中文|[English](README_EN.md)
 
@@ -7,9 +8,9 @@
 
 前端Vue3 慢慢开发了 不着急了。
 
-想着尽善尽美 对于后端把里面的东西都封装的差不多 然后搞一个文档 WEB开发的核心就那么多 不需要文件功能的直接删除文件部分的东西就可以了。至于前端我也想的是这样做 但是得等到后端的基本上都封装完了。
+[前端 -》 file-manage-vue](https://github.com/rico233333333/file-manage-vue/)
 
-看到这里**喜欢**或者**clone**了本仓库就点个**star**支持一下吧 
+看到这里**喜欢❤️❤️❤️**或者**clone🗑️🗑️🗑️**了本仓库就点个**star⭐️⭐️⭐️**支持一下吧 
 
 本仓库作者在闲暇之余会持续更新
 

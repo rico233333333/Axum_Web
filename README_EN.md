@@ -1,3 +1,4 @@
+![alt text](https://github.com/rico233333333/Axum_Web/src/images/svg/logo.svg)
 # Axum_Web Practice File Public Network Mapping Project
 [简体中文](README.md)|English
 
@@ -7,9 +8,11 @@ The backend chose the RUST Axum framework.
 
 The front-end Vue3 is slowly being developed, so there's no hurry.
 
+[front-end -》 file-manage-vue](https://github.com/rico233333333/file-manage-vue/)
+
 Thinking about perfection, for the back-end, encapsulating everything in it is almost the same, and then making a document, the core of WEB development is so much, and you don't need the file function to delete the file part of the things. As for the front-end, I'd like to do that, but I'll have to wait until the back-end is basically finished.
 
-If you **like** or **clone** this repository, please give it a **star** to support it.
+If you **like❤️❤️❤️** or **clone🗑️🗑️🗑️** this repository, please give it a **star⭐️⭐️⭐️** to support it.
 
 The author of this repository will continue to update it in his spare time.
 
